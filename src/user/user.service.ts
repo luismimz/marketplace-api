@@ -2,7 +2,7 @@ import { Injectable, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import * as bcrypt from 'bcrypt'; 
+import * as bcrypt from 'bcrypt';
 @Injectable()
 export class UserService {
   constructor(private readonly prisma: PrismaService) {}
@@ -21,21 +21,21 @@ export class UserService {
     // Verificar si el usuario ya existe
     const existingUser = await this.prisma.user.findFirst({
       where: {
-        OR: [
-          { email: normalizedEmail },
-          { username: normalizeUsername },
-        ],
+        OR: [{ email: normalizedEmail }, { username: normalizeUsername }],
       },
     });
     if (existingUser) {
-      throw new ConflictException('El usuario ya existe con ese email o username');
+      throw new ConflictException(
+        'El usuario ya existe con ese email o username',
+      );
     }
     // Hashear la contraseña antes de guardarla
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
     console.log('Contraseña hasheada:', hashedPassword);
-    createUserDto.password = hashedPassword; // Asignar la contraseña hasheada al DTO     
+    createUserDto.password = hashedPassword; // Asignar la contraseña hasheada al DTO
     return this.prisma.user.create({
-      data: {...createUserDto,
+      data: {
+        ...createUserDto,
         password: hashedPassword, // Asegurarse de que la contraseña hasheada se guarde
       },
     });
@@ -44,7 +44,7 @@ export class UserService {
   async findAll() {
     return this.prisma.user.findMany();
   }
-//esta parte es un ejemplo de cómo se podría implementar un método para encontrar un usuario por ID
+  //esta parte es un ejemplo de cómo se podría implementar un método para encontrar un usuario por ID
   findOne(id: number) {
     const userId = Number(id);
     if (isNaN(userId)) {

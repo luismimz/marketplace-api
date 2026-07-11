@@ -1,7 +1,18 @@
-//El controlador expone la Api rest, recibe las peticiones del panel admin/frontend , 
+//El controlador expone la Api rest, recibe las peticiones del panel admin/frontend ,
 //recoge y valida los datos usando los DTOs y llama a los metodos del serivicio.
-import { Controller, UseGuards, Get, Post, Patch, Delete, Param, Body, 
-  Query, ParseIntPipe, DefaultValuePipe } from '@nestjs/common';
+import {
+  Controller,
+  UseGuards,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Param,
+  Body,
+  Query,
+  ParseIntPipe,
+  DefaultValuePipe,
+} from '@nestjs/common';
 import { PluginsService } from './plugins.service';
 import { CreatePluginDto } from './dto/create-plugin.dto';
 import { UpdatePluginDto } from './dto/update-plugin.dto';
@@ -22,7 +33,7 @@ export class PluginsController {
   // Por ejemplo, ?page=1&limit=10 para paginación
   // y ?name=pluginName para filtrar por nombre
   // Puedes usar DefaultValuePipe para establecer valores por defecto
-  @Get() 
+  @Get()
   async findAll(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
@@ -31,12 +42,12 @@ export class PluginsController {
     @Query('active') active?: boolean,
     @Query('includeDeleted') includeDeleted?: boolean,
   ) {
-    //convierte los strings a booleanos "true" o "false" reales 
+    //convierte los strings a booleanos "true" o "false" reales
     const parseActive = typeof active === 'string' ? active === 'true' : active;
-    const parseIncludeDeleted = 
-    typeof includeDeleted === 'string' 
-    ? includeDeleted === 'true'
-    : includeDeleted;
+    const parseIncludeDeleted =
+      typeof includeDeleted === 'string'
+        ? includeDeleted === 'true'
+        : includeDeleted;
     return this.pluginsService.findAll({
       page,
       limit,
@@ -45,7 +56,7 @@ export class PluginsController {
       active: parseActive,
       includeDeleted: parseIncludeDeleted,
     });
-  }   
+  }
   //optener un plugin por id
   //usando ParseIntPipe para validar que el id es un número entero
   @Get(':id')
@@ -73,7 +84,7 @@ export class PluginsController {
   @Patch(':id/restore')
   async restore(@Param('id', ParseIntPipe) id: number) {
     return this.pluginsService.restore(id);
-  } 
+  }
   // Endpoint para eliminar un plugin de forma permanente
   @Delete(':id/hard')
   async hardDelete(@Param('id', ParseIntPipe) id: number) {
@@ -82,7 +93,7 @@ export class PluginsController {
   // Endpoint para activar o desactivar un plugin por id
   @Patch(':id/active')
   async toggleActive(
-    @Param('id', ParseIntPipe) id: number, 
+    @Param('id', ParseIntPipe) id: number,
     @Body('active') active: boolean,
   ) {
     return this.pluginsService.toggleActive(id, active);

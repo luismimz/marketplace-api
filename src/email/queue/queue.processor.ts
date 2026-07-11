@@ -1,29 +1,34 @@
-import { Process, Processor } from "@nestjs/bull";
-import { Job } from "bullmq";
-import { EmailService } from "../email.service";
+import { Process, Processor } from '@nestjs/bull';
+import { Job } from 'bull';
+import { EmailService, EmailJobData } from '../email.service';
 
 @Processor('email')
 export class EmailQueueProcessor {
-  constructor(private readonly emailService: EmailService) {}
+  constructor(private readonly emailService: EmailService) {
+    console.log('🚀 EmailQueueProcessor INICIALIZADO');
+  }
 
-  @Process()
-  async handleEmailJob(job: Job) {
+  @Process('send')
+  async handleEmailJob(job: Job<EmailJobData>) {
+    console.log('➡️ Procesando trabajo de la cola:', job.data);
     //Aqui procesa el job recibido de la cola (enviando el correo)
-    const { templateKey, to, replacements, sentById, ip, userAgent, type } = job.data;
+    const { key, to, replacements, sentById, ip, userAgent, emailType } =
+      job.data;
     try {
-      await this.emailService.sendTemplate(templateKey, {
+      console.log('📩 ENTRANDO en handleEmailJob, DATA:', job.data);
+      await this.emailService.sendTemplate(key, {
         to,
         replacements,
         sentById,
         ip,
         userAgent,
-        type,
+        emailType,
       });
-      console.log(`Correo enviado a ${to} usando la plantilla ${templateKey}`);
+      console.log(`✅ Correo enviado a ${to} usando la plantilla ${key}`);
       return true; // Retorna true si el envío fue exitoso
     } catch (err) {
       //Puedes loguar o gestionar el error como desees
-      console.error(`Error al enviar el correo a ${to}:`, err);
+      console.error(`❌ Error al enviar el correo a ${to}:`, err);
       throw err;
     }
   }

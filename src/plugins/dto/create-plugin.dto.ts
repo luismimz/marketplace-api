@@ -1,6 +1,12 @@
 //valida lo que llega a la API, protege contra inyecciones y errores en BBDD
 //y facilita el trabajo del administrador del panel de control y frontend.
-import { IsString, IsBoolean, IsOptional, IsNotEmpty, IsJSON } from "class-validator";
+import {
+  IsString,
+  IsBoolean,
+  IsOptional,
+  IsNotEmpty,
+  IsJSON,
+} from 'class-validator';
 
 export class CreatePluginDto {
   @IsString()
@@ -18,7 +24,7 @@ export class CreatePluginDto {
   @IsBoolean()
   @IsOptional()
   active?: boolean;
-  
+
   @IsNotEmpty()
   config: any; // Configuración adicional del plugin, puede ser un objeto JSON
 
@@ -28,6 +34,5 @@ export class CreatePluginDto {
 
   @IsString()
   @IsOptional()
-  description?: string; // Descripción del plugin, opcional 
-
+  description?: string; // Descripción del plugin, opcional
 }

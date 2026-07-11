@@ -1,0 +1,5 @@
+-- MIGRACIÓN NEUTRALIZADA / ELIMINADA
+-- Se dejó el archivo para preservar checksum histórico pero no realiza cambios.
+-- Fecha de neutralización: 2025-08-12
+-- Razón: estrategia revertida; se mantiene enum legacy en base de datos.
+-- Contenido original eliminado intencionalmente.

@@ -1,17 +1,37 @@
-import { Controller, Query, Get, Post, Body, Param, Delete, Patch, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiParam, ApiOperation, ApiResponse, ApiBody, ApiQuery } from '@nestjs/swagger';
+import {
+  Controller,
+  Query,
+  Get,
+  Post,
+  Body,
+  Param,
+  Delete,
+  Patch,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiParam,
+  ApiOperation,
+  ApiResponse,
+  ApiBody,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { TemplateService } from './template.service';
 import { CreateTemplateDto } from '../dto/create-template.dto';
 import { UpdateTemplateDto } from '../dto/update-template.dto';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { AuthGuard } from '@nestjs/passport';
-import { EmailType } from '@prisma/client'; // importa el enum de Prisma
+
+// La gestión de plantillas de email usa contentType para especificar si la plantilla es html/text/both.
+// NO se maneja emailType aquí, sólo en los logs/envíos.
 
 @ApiTags('Plantillas de Email')
 @ApiBearerAuth()
 @Controller('email/templates')
-@UseGuards(AuthGuard('jwt'), RolesGuard) // Protege TODOS los endpoints del controller
+@UseGuards(AuthGuard('jwt'), RolesGuard)
 @Roles('admin', 'moderator')
 export class TemplateController {
   constructor(private readonly templateService: TemplateService) {}
@@ -21,16 +41,21 @@ export class TemplateController {
   @ApiResponse({ status: 201, description: 'Plantilla creada.' })
   @Post()
   create(@Body() dto: CreateTemplateDto) {
+    // contentType: 'text' | 'html' | 'both' debe estar presente en dto
     return this.templateService.create(dto);
   }
 
   @ApiOperation({ summary: 'Listar todas las plantillas de email' })
-  @ApiQuery({ name: 'type', required: false, description: 'Filtrar por tipo (text, html, both)' })
+  @ApiQuery({
+    name: 'contentType',
+    required: false,
+    description: 'Filtrar por tipo de contenido (text, html, both)',
+  })
   @ApiResponse({ status: 200, description: 'Lista de plantillas.' })
   @Get()
-  findAll(@Query('type') type?: string) {
-    const where = type ? { type: type as EmailType } : undefined;
-    return this.templateService.findAll(where);
+  findAll(@Query('contentType') contentType?: string) {
+    // Filtra por contentType si se proporciona, por ejemplo /email/templates?contentType=html
+    return this.templateService.findAll(contentType);
   }
 
   @ApiOperation({ summary: 'Ver detalles de una plantilla de email' })
@@ -47,6 +72,7 @@ export class TemplateController {
   @ApiResponse({ status: 200, description: 'Plantilla actualizada.' })
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateTemplateDto) {
+    // contentType sólo si necesitas cambiar el formato (html/text/both)
     return this.templateService.update(id, dto);
   }
 

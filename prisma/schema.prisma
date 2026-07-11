@@ -12,18 +12,572 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
 model User {
-  id               Int      @id @default(autoincrement())
-  email            String   @unique
-  password         String
-  username         String   @unique
-  role             String[]   @default(["user"]) 
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime? @updatedAt
-  profile          Profile?
-  loginLog        LoginLog[]
-  emailLogs       EmailLog[] @relation("UserEmailLogs") //
+  id                         Int              @id @default(autoincrement())
+  username                   String           @unique
+  type                       UserType?
+  role                       String[]         @default(["user"])
+  subscription               Subscription[] //relacion inversa con model subscription
+  OnboardingStatus           OnboardingStatus @default(REGISTERED)
+  email                      String           @unique
+  emailVerified              Boolean          @default(false)
+  emailVerificationCode      String? //codigo enviado por mail (PIN)
+  emailVerificationExpiresAt DateTime?
+  phone                      String?          @unique
+  phoneVerified              Boolean          @default(false)
+  dateOfBirth                DateTime? //obligatorio
+  isOnline                   Boolean          @default(false)
+  isVerified                 Boolean          @default(false) // selfie + DNI
+  isBanned                   Boolean          @default(false)
+  isBlocked                  Boolean          @default(false)
+  deletedAt                  DateTime?
+  lastLoginAt                DateTime? //ultima vez conectado
+  lastActivityAt             DateTime? //muy util para mostrar perfiles activos y ordenados
+  location                   Json? // filtrado por geo
+  customFields               Json? // permite añadir mas campos desde el panel de administrador
+  reputationScore            Int              @default(0) // Penaliza o bonifica acciones
+  password                   String
+  createdAt                  DateTime         @default(now())
+  updatedAt                  DateTime         @updatedAt
+
+  profile      Profile?
+  loginLog     LoginLog[]
+  emailLogs    EmailLog[]    @relation("UserEmailLogs")
+  Verification Verification?
+  travelPlans  TravelPlan[]
+
+  // -- PAUSA TEMPORAL de cuentas / vacaciones --
+  isTemporarilyDisabled Boolean   @default(false) //pausa / vacaciones
+  disabledForm          DateTime? //inicio pausa
+  disabledUntil         DateTime? // fin pausa
+  disableReason         String? //  nota breve (vacaciones, viaje)
+
+  //recordatoris de viajes (relaciones inversas)
+  followingTravelReminders TravelReminder[] @relation("TravelFollower") //yo sigo a otros
+  followerTravelReminders  TravelReminder[] @relation("TravelTarget") // otros me siguen
+
+  //seguimientos
+  following Follow[] @relation("UserFollower") //yo sigo a otros (rows donde soy followedId)
+  followers Follow[] @relation("UserFollowers") //otros me siguen(rows donde soy followingID)
+
+  //relacion 1:1 con Agency por la cuenta (userId. es unique)
+  AgencyAccount Agency? @relation("AgencyAccount")
+
+  //relacion 1:1 como propietario/gestor (puede poseer varias agencias)
+  agenciesOwned Agency[] @relation("AgencyOwner")
+
+  //Reviews 
+  reviewsWritten Review[] @relation("FromReview") //reseña de quien escribio
+  reviewReceived Review[] @relation("ToReview") //reseñas que recibe
+
+  MediaReactions MediaReaction[]
+  MediaComments  MediaComment[]
+  MediaAuths     MediaAuth[]
 }
+
+enum UserType {
+  CLIENT
+  ESCORT
+  AGENCY
+}
+
+//Estado del proceso de alta (wizard)
+enum OnboardingStatus {
+  REGISTERED //se creo la cuenta, email sin verificacion
+  PLAN_SELECTED //eligio plan/upsells (Gate1)
+  PAYMENT_CONFIRMED //Pago Ok (aun falta la moderacion)
+  ACTIVE // Perfil activo /publico
+}
+
+model Verification {
+  id         Int                @id @default(autoincrement())
+  userId     Int                @unique
+  selfieUrl  String // URL de la foto con el documento
+  docType    String? // Tipo de documento (DNI, pasaporte, etc)
+  docNumber  String? // (opcional, si lo queremos registrar)
+  status     VerificationStatus @default(PENDING)
+  reviewedAt DateTime? // Fecha de revisión
+  reviewedBy Int? // Admin que revisó
+  comment    String? // Comentario del admin (ej: “documento borroso”)
+  ip         String? // IP desde la que se subió
+  userAgent  String? // Dispositivo
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Plan {
+  id           Int      @id @default(autoincrement())
+  key          String   @unique // p.ej.: 'ESCORT_PRO', 'AGENCY_PRO', ...
+  name         String
+  description  String?
+  applicableTo UserType // CLIENT | ESCORT | AGENCY
+  currency     String   @default("EUR")
+  monthlyPrice Decimal  @default(0)
+  yearlyPrice  Decimal  @default(0)
+  isActive     Boolean  @default(true)
+
+  // relaciones
+  subscriptions Subscription[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model Subscription {
+  id           Int                @id @default(autoincrement())
+  userId       Int
+  planId       Int
+  billingCycle BillingCycle
+  status       SubscriptionStatus @default(PENDING)
+  autoRenew    Boolean            @default(true)
+
+  // Ventanas temporales (según ciclo o pago único)
+  startedAt DateTime? // se fija al confirmar el pago
+  expiresAt DateTime? // se calcula según ciclo
+
+  // Upsells iniciales (dejamos JSON por simplicidad)
+  addons              Json? // p.ej.: ["featured"]
+  activateOnPlatforms Json? // p.ej.: ["smender.com","sexchapero.com"]
+
+  // Auditoría
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // relaciones
+  user     User      @relation(fields: [userId], references: [id])
+  plan     Plan      @relation(fields: [planId], references: [id])
+  payments Payment[]
+}
+
+model Payment {
+  id             Int           @id @default(autoincrement())
+  subscriptionId Int
+  method         PaymentMethod
+  status         PaymentStatus @default(PENDING)
+  currency       String        @default("EUR")
+  amount         Decimal       @default(0)
+  reference      String        @unique // p.ej.: SC-482097-AB12CD
+
+  // Timestamps
+  createdAt   DateTime  @default(now())
+  confirmedAt DateTime?
+
+  // Info específica del proveedor (IDs PayPal/Verotel, adjuntos de transferencia/Bizum)
+  providerData Json?
+
+  // relaciones
+  subscription Subscription @relation(fields: [subscriptionId], references: [id])
+}
+
+enum BillingCycle {
+  MONTHLY
+  YEARLY
+}
+
+enum SubscriptionStatus {
+  PENDING // creada pero aún sin pago/activación
+  ACTIVE // vigente y pagada
+  EXPIRED // vencida por fecha
+  CANCELED // cancelada manualmente
+  SUSPENDED // pausa por impago/moderación/etc.
+}
+
+enum PaymentMethod {
+  PAYPAL
+  BANK_TRANSFER
+  BIZUM
+  VEROTEL
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELED
+}
+
+model Profile {
+  id                Int           @id @default(autoincrement())
+  userId            Int           @unique
+  avatar            String?
+  location          Json //tendra varios parametros, provincia, ciudad, poblacion, isla, etc, ampliable a mas paises
+  locationPublic    Boolean       @default(true)
+  platformId        String //conectamos con la plataforma
+  acceptTerms       Boolean       @default(false) // Aceptó las condiciones legales
+  acceptedAt        DateTime? // Cuándo aceptó
+  acceptedIp        String? // IP desde la que lo hizo
+  createdByAgencyId Int? // Si fue creado por agencia
+  status            ProfileStatus @default(DRAFT)
+  lastUpdatedBy     Int? // ID del admin que hizo el último cambio manual
+
+  user            User     @relation(fields: [userId], references: [id])
+  platform        Platform @relation(fields: [platformId], references: [id])
+  createdByAgency Agency?  @relation(fields: [createdByAgencyId], references: [id])
+
+  //relacion inversa para los campos custom
+  customFields ProfileCustomField[]
+  media        Media[]              @relation("ProfileMedia")
+
+  //Vinculaciones con agencias(tabla intermedia)
+  agencies ProfileAgency[]
+
+  shareMedia SharedMedia[]
+
+  @@unique([userId, platformId]) // un perfil por usuario + plataforma
+  @@index([platformId]) // <- listas por plataforma mas rapido
+}
+
+enum ProfileStatus {
+  DRAFT // Creado por la agencia, no aprobado
+  PENDING // A la espera de validación del usuario
+  ACTIVE // Público y activo
+  SUSPENDED // Oculto temporalmente por infracción
+  BLOCKED // Eliminado o vetado
+}
+
+model ProfileFieldDefinition {
+  id           Int                  @id @default(autoincrement())
+  name         String //Clave interna: "altura"
+  label        String //Etiqueta visible: "Altura"
+  type         String //"String", "int", "date", "select", etc
+  required     Boolean              @default(false)
+  options      Json? //Opciones si es select o multiselect
+  unique       Boolean              @default(false)
+  //Relación inversa (opcional, para facilidad)
+  customFields ProfileCustomField[]
+}
+
+model ProfileCustomField {
+  id          Int                    @id @default(autoincrement())
+  profileId   Int
+  fieldId     Int
+  valueString String?
+  valueInt    Int?
+  valueBool   Boolean?
+  valueDate   DateTime?
+  valueJson   Json?
+  //relaciones
+  profile     Profile                @relation(fields: [profileId], references: [id])
+  field       ProfileFieldDefinition @relation(fields: [fieldId], references: [id])
+}
+
+model Platform {
+  id           String   @id @default(uuid())
+  name         String // Ej: "Sexchapero"
+  domain       String   @unique // Ej: "sexchapero.com"
+  isActive     Boolean  @default(true)
+  logoUrl      String? // Ruta al logo principal
+  faviconUrl   String? // Ruta al favicon
+  primaryColor String? // Color principal
+  tagline      String? // Frase breve
+  description  String? // Descripción de la plataforma
+  theme        Json? // Configuración visual avanzada (opcional)
+  slug         String?  @unique // "sexchapero" o "smender", útil en rutas como /platform/sexchapero
+  language     String? //ej: "es", "fr", "en", etc
+  sortOrder    Int?     @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  profiles Profile[]
+}
+
+model TravelPlan {
+  id Int @id @default(autoincrement())
+
+  //relacion con el usuario que publica
+  userId Int
+  user   User @relation(fields: [userId], references: [id])
+
+  //Info principal de viaje
+  title    String? //opcional: Gira por canarias
+  city     String? //ej: tenerife
+  region   String? //ej: tenerife sur 
+  country  String? //ej: españa
+  lat      Decimal? @db.Decimal(9, 6) // latitud aprox 
+  lng      Decimal? @db.Decimal(9, 6) // longitud aprox
+  location Json? //GeoJson /polyline / varios ptos si es necesario
+
+  // ventana temporal
+  starDate DateTime? //fecha/hora de llegada
+  endDate  DateTime? //fecha/hora de salida
+
+  // Visibilidad y control
+  isPublic       Boolean @default(true) // visible en listados/perfiles
+  allowFollowers Boolean @default(true) //permite notificacion a seguidores
+  note           String? //  notas: "solo mañanas", "hotel en centro"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, starDate, endDate])
+}
+
+model TravelReminder {
+  id Int @id @default(autoincrement())
+
+  //quien recibe el recordatorio
+  followerId Int
+  follower   User @relation("TravelFollower", fields: [followerId], references: [id])
+
+  // a quien sigue
+  targetUserId Int
+  targetUser   User @relation("TravelTarget", fields: [targetUserId], references: [id])
+
+  //configuracion del recordatorio
+  notifyOnSameCity    Boolean @default(true) //avisar si coincide en ciudad
+  notifyOnNerby       Boolean @default(true) //aviso si estan cerca (GPS)
+  notifyOnTravelDates Boolean @default(true) // avisar si viajaj a la vez
+
+  radiusKm      Int? //opcional: radio km para coincidencia
+  customMessage String? //mensaje personalizado para el aviso
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([followerId, targetUserId]) //evita duplicados de seguimiento
+}
+
+model Follow {
+  id Int @id @default(autoincrement())
+
+  //Quien sigue
+  followerId Int
+  follower   User @relation("UserFollower", fields: [followerId], references: [id])
+
+  // A quien sigue
+  followingId Int
+  following   User @relation("UserFollowers", fields: [followingId], references: [id])
+
+  // Controles de la relacion
+  isMuted   Boolean  @default(false) //no recibe notificaciones pero sigue siguiendo
+  isBlocked Boolean  @default(false) //si se bloquea, el follow queda inactivo y no emite avisos
+  createdAt DateTime @default(now())
+
+  @@unique([followerId, followingId]) //evita duplicados
+  @@index([followingId]) // acceso lista de seguidores de alguien rapidamenter
+}
+
+model Agency {
+  id     Int  @id @default(autoincrement())
+  userId Int  @unique //relacion1:1 con User
+  user   User @relation("AgencyAccount", fields: [userId], references: [id])
+
+  name     String // Nombre de la agencia
+  bio      String? // Descripción visible opcional
+  website  String? // sitio web opcional
+  email    String? @unique // correo principal (único)
+  logoUrl  String? // logo de la agencia
+  city     String?
+  country  String?
+  isOnline Boolean @default(false)
+  active   Boolean @default(true)
+  isPublic Boolean @default(false) //la agencia o representante decide si esta o no visible
+
+  // Representacion legal
+  representativeName  String
+  representativeEmail String
+  representativeDni   String
+  representativePhone String?
+  isVerified          Boolean   @default(false) //verificacion del representante
+  verifiedAt          DateTime? // fecha de verificacion
+
+  customFields Json? //para añadir + campos extras
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relacion con el usuario administrador de la agencia 
+  ownerId Int
+  owner   User @relation("AgencyOwner", fields: [ownerId], references: [id])
+
+  // Relacion con perfiles representados ( via tabla intermedia)
+  profiles       ProfileAgency[] //se vincula con multiples perfiles
+  createProfiles Profile[]
+  shareMedia     SharedMedia[]
+}
+
+model ProfileAgency {
+  id             Int      @id @default(autoincrement())
+  profileId      Int
+  agencyId       Int
+  isActive       Boolean  @default(true) //¿la relacion sigue activa?
+  isAccepted     Boolean  @default(false) //¿el escort ha aceptado?
+  canEdit        Boolean  @default(true) //¿l agencia puede editar el perfil?
+  canSharedMedia Boolean  @default(false) //¿puede usar fotos en galeria de agencia?
+  createdAt      DateTime @default(now())
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  agency  Agency  @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, agencyId]) // Un perfil no puede estar duplicado con la misma agencia
+  @@index([agencyId])
+  @@index([profileId])
+}
+
+model Media {
+  id          Int             @id @default(autoincrement())
+  originalUrl String //Ruta o URL del archivo 1080px/max (local o CDN)
+  thumbUrl    String // Miniatura para mosaicos o previews (300px max)
+  type        MediaType // imagen, video, etc
+  ownerId     Int // ID del propietario( usuario, perfil o agencia)
+  ownerType   MediaOwnerType //Indica de quien es: USER, PROFILE, AGENCY 
+  title       String? // Titulo para el SEO 
+  alt         String? //Text alternativo para seo y accesibilidad
+  order       Int? //para ordenarlas en la galeria
+  isAvatar    Boolean         @default(false) //Imagen principal de perfil
+  isVisible   Boolean         @default(true) // Mostrar o ocultar (moderacion)
+  visibility  MediaVisibility @default(PUBLIC) //(public, private, con autorizacion)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  //relaciones
+  reactions MediaReaction[] // Reacciones tipo 🔥 ❤️ etc. 
+  comments  MediaComment[] //Comentarios de usuarios
+  authUsers MediaAuth[] //usuarios que tienen acceso a imagenes LOCKED
+  shareWith SharedMedia[]
+
+  // Dueño principal del media: Profile( opcional si tmb hay medios en Agency)
+  profileId Int?
+  profile   Profile? @relation("ProfileMedia", fields: [profileId], references: [id])
+
+  @@index([ownerType, ownerId]) //<- listado de galeria
+  @@index([visibility, isVisible]) //<- moderacion / visibilidad
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+}
+
+enum MediaOwnerType {
+  USER
+  PROFILE
+  AGENCY
+}
+
+enum MediaVisibility {
+  PUBLIC //Visible para todos
+  PRIVATE //solo para el propietario
+  LOCKED //Requiere autorizacion para ser vista (tipo grinder)
+}
+
+model MediaReaction {
+  id        Int          @id @default(autoincrement())
+  mediaId   Int
+  userId    Int
+  type      ReactionType
+  createdAt DateTime     @default(now())
+
+  media Media @relation(fields: [mediaId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@unique([mediaId, userId]) // solo 1 relacion por usuario por imagen
+  @@index(userId)
+}
+
+enum ReactionType {
+  LIKE
+  LOVE
+  FIRE
+  WOW
+  HUG
+}
+
+model MediaComment {
+  id        Int      @id @default(autoincrement())
+  mediaId   Int
+  userId    Int
+  comment   String
+  createdAt DateTime @default(now())
+
+  media Media @relation(fields: [mediaId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+}
+
+model MediaAuth {
+  id        Int        @id @default(autoincrement())
+  mediaId   Int
+  userId    Int
+  method    AuthMethod //"REQUEST", "PAYMENT"
+  approved  Boolean    @default(false)
+  createdAt DateTime   @default(now())
+
+  media Media @relation(fields: [mediaId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@unique([mediaId, userId])
+}
+
+enum AuthMethod {
+  REQUEST // solicitud enviada y aprobada
+  PAYMENT //acceso comprado(suscripcion o pago unico)
+}
+
+model SharedMedia {
+  id         Int               @id @default(autoincrement())
+  profileId  Int
+  agencyId   Int
+  mediaId    Int
+  status     SharedMediaStatus @default(PENDING)
+  visible    Boolean           @default(true) //ocultar sin romper vinculo
+  expiredAt  DateTime? //comparticion temporal
+  createdAt  DateTime          @default(now())
+  approvedAt DateTime? // cuando pasa a aprovado
+  removedAt  DateTime? // cuando pasa a removido
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  agency  Agency  @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  media   Media   @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, agencyId, mediaId])
+  @@index([agencyId])
+  @@index([profileId])
+  @@index([mediaId])
+}
+
+enum SharedMediaStatus {
+  PENDING //Solicitud enviad por la agencia, pendiente del usuario
+  APPROVED //Usuario aprobó: se puede mostrar en la agencia
+  REVOCKED //Usuario revocó el permiso
+  BLOCKED //Moderacion / abuso
+}
+
+model Review {
+  id            Int        @id @default(autoincrement())
+  fromUserId    Int // quien escribe la reseña
+  toUserId      Int // quien recibe la reseña
+  rating        Int // del 1 al 5
+  comment       String? //comentario opcional
+  type          ReviewType // Tipo de reseña_ a_usuario, a_escort, a_agencia
+  edited        Boolean    @default(false) // si fue editada despues de enviada
+  reported      Boolean    @default(false) // si fue denunciada
+  resolved      Boolean    @default(false) //si el conflico fue resuelto por el admin
+  removeByAdmin Boolean    @default(false) //si fue borrada por moderacion
+  visible       Boolean    @default(true) //Si debe mostrarse publicamente
+  ip            String? //IP del autor 
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  fromUser User @relation("FromReview", fields: [fromUserId], references: [id])
+  toUser   User @relation("ToReview", fields: [toUserId], references: [id])
+
+  @@unique([toUserId, fromUserId]) //<- 1 reseña por autor destinatario
+  @@index([toUserId])
+}
+
+enum ReviewType {
+  USER
+  PROFILE
+  AGENCY
+}
+
 model LoginLog {
   id             Int      @id @default(autoincrement())
   userId         Int
@@ -38,87 +592,62 @@ model LoginLog {
   user           User     @relation(fields: [userId], references: [id])
 }
 
-model Profile {
-  id        Int     @id @default(autoincrement())
-  userId    Int     @unique
-  avatar    String? //Ruta a la imagen del avatar principal
-  gallery   Json? //Array de imagenes: ["/img/profiles/imagen.jpg"]
-  videos    Json? //Array de videos: ["ruta o url del video"]
-  user      User    @relation(fields: [userId], references: [id])
-  //relacion inversa para los campos custom
-  customFields  ProfileCustomField[]
+model Plugin {
+  id          Int       @id @default(autoincrement())
+  name        String
+  key         String    @unique
+  type        String
+  active      Boolean   @default(true)
+  config      Json //almacena todas las configuraciones y opciones personalizadas del plugin
+  version     String    @default("1.0.0")
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime? //no se borra completamente es rescatable por si hay error o incidencia 
 }
 
-model ProfileFieldDefinition {
-  id        Int      @id @default(autoincrement() )
-  name      String   //Clave interna: "altura"
-  label     String   //Etiqueta visible: "Altura"
-  type      String   //"String", "int", "date", "select", etc
-  required  Boolean  @default(false)
-  options   Json?    //Opciones si es select o multiselect
-  unique    Boolean  @default(false)
-  //Relación inversa (opcional, para facilidad)
-  customFields ProfileCustomField[]
+model EmailTemplate {
+  id          String            @id @default(uuid())
+  key         String            @unique
+  subject     String
+  text        String?
+  html        String?
+  variables   String[] // <- Guarda variables soportadas por plantilla
+  contentType EmailContentType? // text, html, both
+  emailType   EmailType? // critico, info, etc. (enum, ver abajo)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
 }
 
-model ProfileCustomField {
-  id          Int   @id @default(autoincrement())
-  profileId   Int
-  fieldId     Int
-  valueString String?
-  valueInt    Int?
-  valueBool   Boolean?
-  valueDate   DateTime?
-  valueJson   Json?
-  //relaciones
-  profile     Profile   @relation(fields: [profileId], references: [id])
-  field     ProfileFieldDefinition  @relation(fields: [fieldId], references: [id])
-  }
+enum EmailContentType {
+  text
+  html
+  both
+}
 
-  model Plugin {
-    id          Int     @id @default(autoincrement())
-    name        String  
-    key         String  @unique
-    type        String
-    active      Boolean @default(true)
-    config      Json //almacena todas las configuraciones y opciones personalizadas del plugin
-    version     String  @default("1.0.0")
-    description String?
-    createdAt   DateTime  @default(now())
-    updatedAt   DateTime  @updatedAt
-    deletedAt   DateTime? //no se borra completamente es rescatable por si hay error o incidencia 
-  }
+// Si quieres limitar los tipos de email (mejor que String)
+enum EmailType {
+  critico
+  info
+  newsletter
+  alerta
+}
 
-  model EmailTemplate {
-    id          String    @id @default(uuid())
-    key         String    @unique
-    subject     String  
-    text        String?
-    html        String?
-    type        EmailType
-    createdAt   DateTime  @default(now())
-    updatedAt   DateTime  @updatedAt
-  }
-
-  enum EmailType {
-    text
-    html
-    both
-  }
-  model EmailLog {
-    id          Int       @id @default(autoincrement())
-    to          String    //destinatario
-    subject     String    
-    templateKey String?   // clave de la plantilla usada (si aplica)
-    sentById    Int?      // Id del usuario que envio (admin/moderador)
-    sentBy      User?     @relation("UserEmailLogs", fields: [sentById], references: [id])
-    status      String    // "ok", "error"
-    errorMsg    String?   // si hubo error, mensaje de error
-    ip          String?   // IP del admin/mod que envia
-    userAgent   String?   // Navegador usado
-    html        String?   // HTML del correo (solo email criticos)
-    text        String?   // Texto plano de correo (solo email critico)
-    type        String    // "critico", "newsletter", "info", etc
-    replacements  String? // Guarda variables como JSON
-    createdAt   DateTime  @default(now())
-  }
+model EmailLog {
+  id           Int      @id @default(autoincrement())
+  userId       Int? //Id de usuario destinatario
+  sentById     Int? // Id del usuario que envio (admin/moderador)
+  createdAt    DateTime @default(now())
+  to           String //destinatario   
+  key          String? // clave de la plantilla usada (si aplica)
+  subject      String
+  emailType    String? // "critico", "newsletter", "info", etc
+  replacements String? // Guarda variables como JSON
+  html         String? // HTML del correo (solo email criticos)
+  text         String? // Texto plano de correo (solo email critico)
+  sentBy       User?    @relation("UserEmailLogs", fields: [sentById], references: [id])
+  status       String // "ok", "error"
+  errorMsg     String? // si hubo error, mensaje de error
+  ip           String? // IP del admin/mod que envia
+  userAgent    String? // Navegador usado 
+}

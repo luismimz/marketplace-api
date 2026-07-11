@@ -23,7 +23,7 @@ export class PluginsService {
     });
     if (exists)
       throw new BadRequestException(
-        'Ya existe un plugin con este key. Usa uno diferente.'
+        'Ya existe un plugin con este key. Usa uno diferente.',
       );
     // Crea el plugin en la BBDD
     return this.prisma.plugin.create({ data: createPluginDto });
@@ -90,16 +90,13 @@ export class PluginsService {
     if (!plugin || plugin.deletedAt)
       throw new NotFoundException('Plugin no encontrado o eliminado');
     // Si intentan cambiar el key, valida duplicidad
-    if (
-      updatePluginDto.key &&
-      updatePluginDto.key !== plugin.key
-    ) {
+    if (updatePluginDto.key && updatePluginDto.key !== plugin.key) {
       const exists = await this.prisma.plugin.findUnique({
         where: { key: updatePluginDto.key },
       });
       if (exists)
         throw new BadRequestException(
-          'Ya existe un plugin con ese key, no se puede duplicar.'
+          'Ya existe un plugin con ese key, no se puede duplicar.',
         );
     }
     // Actualiza el registro
@@ -127,8 +124,7 @@ export class PluginsService {
   // Hard delete (elimina completamente, solo para superadmin)
   async hardDelete(id: number) {
     const plugin = await this.prisma.plugin.findUnique({ where: { id } });
-    if (!plugin)
-      throw new NotFoundException('Plugin no encontrado');
+    if (!plugin) throw new NotFoundException('Plugin no encontrado');
     return this.prisma.plugin.delete({ where: { id } });
   }
 
@@ -153,6 +149,4 @@ export class PluginsService {
       data: { active },
     });
   }
-
-  
 }
